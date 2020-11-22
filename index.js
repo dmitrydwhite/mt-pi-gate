@@ -7,7 +7,7 @@ const express = require('express');
 const SerialPort = require('serialport');
 const WebSocket = require('ws');
 
-const { newNodeGateway } = require('../../mt-node-gateway-lib-v2/index');
+const { newNodeGateway } = require('majortom-gateway');
 const systemIncomingMessageHandler = require('./systemIncomingMessageHandler');
 const {
   addSystem,
