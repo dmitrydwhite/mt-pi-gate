@@ -1,0 +1,56 @@
+POST http://localhost:3000/add-system
+Content-Type: application/json
+Accept: application/json
+System-Handshake: 12345
+
+{ "systemName": "hapticProcessor" }
+
+#######
+
+GET http://localhost:3000/system/happenator
+Content-Type: application/json
+System-Handshake: 12345
+
+{ "happenator": [{
+  "type": "event"
+}] }
+
+########
+
+GET http://localhost:3000/system/hapticProcessor
+Content-Type: application/json
+System-Handshake: 12345
+
+{ "hapticProcessor":
+  [
+    {
+      "type": "command_update",
+      "command": {
+        "system": "hapticProcessor",
+        "id": 497729,
+        "state": "done_on_system"
+      }
+    }
+  ]
+}
+
+#########
+
+GET http://localhost:3000/connect?verbose=true&host=app%2Emajortom%2Ecloud
+X-Gateway-Token: 26f57249cbe7ea71d7535bebc206635dba15fd2d104e693f284395a98d0457a1
+
+#########
+
+POST http://localhost:3000/add-system-usb?parser=Delimiter&delimiter=P
+Content-Type: application/json
+
+{
+  "system": {
+    "name": "Moisture_Sensor",
+    "portPath": "/dev/tty.usbmodem14601",
+    "delimiter": "P",
+    "parser": "Delimiter"
+  }
+}
+
+##########
