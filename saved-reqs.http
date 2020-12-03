@@ -1,9 +1,24 @@
-POST http://localhost:3000/add-system
+POST http://192.168.4.41:3003/add-system
 Content-Type: application/json
 Accept: application/json
 System-Handshake: 12345
 
-{ "systemName": "hapticProcessor" }
+{ "systemName": "rpiSystem2" }
+
+#######
+
+GET http://192.168.4.41:3003/system/rpiSystem1
+Content-Type: application/json
+Accept: application/json
+System-Handshake: 12345
+
+#######
+
+{
+  "rpiSystem1": [
+    { "type": "measurements" }
+  ]
+}
 
 #######
 

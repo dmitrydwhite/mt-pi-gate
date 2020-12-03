@@ -1,14 +1,18 @@
 const { EventEmitter } = require('events');
 const http = require('http');
 // const https = require('https'); // Todo: figure out how to configure for a secure WS
+const path = require('path');
 
 const cors = require('cors');
 const express = require('express');
+const { newNodeGateway } = require('majortom-gateway');
 const SerialPort = require('serialport');
 const WebSocket = require('ws');
 
-const { newNodeGateway } = require('majortom-gateway');
+const { port, systemHandshake: validHandshake } = require('./conf/gatewayConf.json');
+const { HTTP, SEND_NEXT_IF_ABLE, SYSTEM_ADDED, WEBSOCKET } = require('./constants');
 const systemIncomingMessageHandler = require('./systemIncomingMessageHandler');
+const fileUploader = require('./fileUploadThrottler');
 const {
   addSystem,
   queueDataForSystem,
@@ -18,14 +22,24 @@ const {
   pendForMajorTom,
   unloadForMajorTom,
 } = require('./systemManager');
-const { HTTP, SEND_NEXT_IF_ABLE, SYSTEM_ADDED, WEBSOCKET } = require('./constants');
-const { addSystemUi, addUiConnection, updateUiWithTransition, removeCommand } = require('./uiManager');
+const {
+  addSystemUi,
+  addPendingSystemUi,
+  addUiConnection,
+  updateUiWithTransition,
+  removeCommand,
+} = require('./uiManager');
+const newFileHandler = require('./FileHandler');
+const usbMonitor = require('./getUsbPaths')();
+
+usbMonitor.on('inserted', insertedPaths => {
+  insertedPaths.forEach(insertedPath => {
+    addPendingSystemUi(path.join('/dev/', insertedPath));
+  });
+});
 
 const eventBus = new EventEmitter();
 const app = express();
-
-// TODO: Make port configurable
-const port = 3003;
 
 // Load any data that's been saved to our config file...
 // Create a log file...
@@ -43,10 +57,11 @@ const userListeners = {};
 // TODO: Need to figure out how we can safely run JavaScript received from elsewhere...?
 let checkCommandValid = () => true;
 
-let savedToken = `generate random placeholder value ${Date.now()}`;
-let validHandshake = '12345';
+let savedToken = `generate dynamic placeholder value ${Date.now()}`;
 let majorTomCx;
 
+const { receiveFileFromHttp, unloadWaitingFiles, upload } = fileUploader(majorTomCx);
+const fileHandler = newFileHandler();
 
 eventBus.on(SYSTEM_ADDED, (system, type, cx) => {
   addSystem(system, type, cx);
@@ -158,6 +173,38 @@ const defaultListeners = {
       commandHandlers.downlinking_from_system(data);
     }
   },
+  start_file_receive: data => {
+    const { system, fileName, commandId, contentType, metadata } = data;
+
+    fileHandler.start(system, fileName);
+
+    fileHandler.onDone(system, fileName)((err, filePath) => {
+      if (err) {
+        eventBus.emit(
+          'transition',
+          'failed_on_system',
+          data,
+          [new Error(`Downlink of file ${fileName} from sytem ${system} was missing chunks ${err}`)]
+        );
+      }
+
+      upload({ fileName, filePath, system, contentType, commandId, metadata });
+
+      if (commandId) {
+        eventBus.emit('transition', 'done_on_system', data);
+      }
+    });
+  },
+  receive_file_chunk: data => {
+    const { system, fileName, chunk, sequence } = data;
+
+    fileHandler.writeChunk(system, fileName, { chunk, sequence });
+  },
+  receive_file_done: data => {
+    const { system, fileName } = data;
+
+    fileHandler.finish(system, fileName);
+  },
   done_on_system: data => {
     // const { id, system } = data;
 
@@ -236,6 +283,10 @@ const commandCallback = cmd => {
 
 const cancelCallback = cmd => {
   eventBus.emit('transition', 'cancel_on_gateway', cmd.id);
+};
+
+const errorCallback = err => {
+  majorTomCx = null;
 };
 
 // TODO: Figure out: do we need rate limit callback, transit event callbacks?
@@ -453,6 +504,26 @@ app.get('/system/:systemName/', (req, res) => {
   res.json({ messages });
 });
 
+app.post('/system/:systemName/file', (req, res) => {
+  const { systemName } = req.params;
+  const { commandId, fileName } = req.query;
+
+  if (!validateSystemHttp(req)) {
+    return res.sendStatus(403);
+  }
+
+  if (!(req.files && req.files.fileUpload)) {
+    return res.status(500).send('Error: Send a single file in the "fileUpload" field');
+  }
+
+  receiveFileFromHttp({ systemName, fileName, commandId }, fileUpload)
+    .then(fileObj => {
+      upload(fileObj);
+      res.sendStatus(200);
+    })
+    .catch(errorMessage => res.status(500).send(errorMessage));
+});
+
 app.get('/connect', (req, res) => {
   const { host, sslVerify, basicAuth, http, sslCaBundle, verbose } = req.query;
   const gatewayToken = req.headers['x-gateway-token'];
@@ -472,10 +543,12 @@ app.get('/connect', (req, res) => {
         verbose,
         commandCallback,
         cancelCallback,
+        errorCallback,
       })
 
       majorTomCx.connect();
 
+      unloadWaitingFiles(majorTomCx);
       unloadForMajorTom().forEach(waiting => {
         const [[method, args]] = Object.entries(waiting);
 

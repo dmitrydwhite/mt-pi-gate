@@ -9,6 +9,7 @@ const statusTexts = {
 
 const systems = {};
 const commands = {};
+const pendingSystems = {};
 let uiCxes = [];
 
 const addUiConnection = (cx, messageCallback) => {
@@ -40,6 +41,15 @@ const addSystemUi = (systemName, type) => {
   sendUpdates();
 };
 
+const addPendingSystemUi = serialPath => {
+  pendingSystems[serialPath] = {
+    path: serialPath,
+    type: 'USB',
+  };
+
+  sendUpdates();
+};
+
 const updateSystemUi = system => {
   const { systemName } = system;
 
@@ -52,7 +62,7 @@ const updateSystemUi = system => {
 };
 
 const sendUpdates = () => {
-  const jsonUpdate = JSON.stringify({ systems, commands });
+  const jsonUpdate = JSON.stringify({ systems, commands, pendingSystems });
 
   uiCxes.forEach(connection => {
     if (connection && connection.readyState === 1) {
@@ -84,7 +94,7 @@ const updateUiWithTransition = (nextState, update, errors) => {
 
   if (system) next.system = system;
   if (type) next.description = type;
-  if (fields) next.fields = fields;
+  if (fields) next.fields = fieldProps;
 
   commands[id] = {
     ...(commands[id] || {}),
@@ -127,6 +137,7 @@ const updateUiWithTransition = (nextState, update, errors) => {
 module.exports = {
   addUiConnection,
   addSystemUi,
+  addPendingSystemUi,
   removeCommand,
   updateSystemUi,
   updateUiWithTransition,
