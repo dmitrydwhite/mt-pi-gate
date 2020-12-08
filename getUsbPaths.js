@@ -1,6 +1,5 @@
 const { EventEmitter } = require('events');
 const fs = require('fs');
-const path = require('path');
 
 const BASE_USB_PATH = '/dev';
 
@@ -9,9 +8,7 @@ const generateDrives = () => new Promise((resolve, reject) => {
     if (err) reject(err);
 
     resolve(
-      results
-        .filter(f => f.indexOf('tty') === 0)
-        .reduce((accum, curr) => ({ ...accum, [curr]: true }), {})
+      results.reduce((accum, curr) => ({ ...accum, [curr]: true }), {})
     );
   });
 });
@@ -42,9 +39,9 @@ const usbPathChanges = () => {
   let baselineDrives;
   let pollInterval;
 
-  const startPolling = (delay = 500) => {
+  const startPolling = (delay = 1000) => {
     clearInterval(pollInterval);
-    baselineDrives = generateDrives();
+    baselineDrives = null;
     emitter.emit('pollstart');
 
     emitter.on('inserted', insertedPaths => {

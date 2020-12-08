@@ -1,5 +1,6 @@
 const { EventEmitter } = require('events');
 const fs = require('fs');
+const path = require('path');
 const { Transform } = require('stream');
 
 const { TEMP_FILE_PATH } = require('./constants');
@@ -39,21 +40,20 @@ class FileChunker extends Transform {
   }
 
   _flush(cb) {
-    const remaining = Object.keys(this.bagOfHolding);
+    const highestChunk = Math.max(...Object.keys(this.bagOfHolding));
+    const holes = [];
 
-    if (remaining.length === 0) {
-      this.emit(FILE_COMPLETE);
-    } else {
-      const holes = [];
-      const workingChunk = Math.max(...remaining) - 1;
-
-      for (let i = workingChunk; i >= 0; i--) {
-        if (!this.bagOfHolding[i] || this.bagOfHolding[workingChunk] === true) {
-          holes.push(i);
-        }
+    for (let i = 0; i <= highestChunk; i++) {
+      if (!this.bagOfHolding[i] || this.bagOfHolding[i] instanceof Buffer) {
+        this.push(this.bagOfHolding[i]);
+        holes.push(i);
       }
+    }
 
+    if (holes.length > 0) {
       this.emit(CHUNKS_MISSING, holes);
+    } else {
+      this.emit(FILE_COMPLETE);
     }
 
     cb();
@@ -157,8 +157,10 @@ const newFileHandler = () => {
       working[target] = fileReceiver(system, fileName);
     }
 
-    working[target].onFinish(cb);
-    delete working[target];
+    working[target].onFinish((err, filePath) => {
+      cb(err, filePath);
+      delete working[target];
+    });
   };
 
   return {

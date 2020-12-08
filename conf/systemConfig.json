@@ -1,0 +1,7 @@
+{
+  "happenator": {
+    "tune_directionator": "radio_two",
+    "*": "radio_one"
+  },
+  "uplink_file": "gateway_file_service"
+}

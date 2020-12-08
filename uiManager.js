@@ -10,6 +10,7 @@ const statusTexts = {
 const systems = {};
 const commands = {};
 const pendingSystems = {};
+let logs = [];
 let uiCxes = [];
 
 const addUiConnection = (cx, messageCallback) => {
@@ -31,6 +32,7 @@ const addUiConnection = (cx, messageCallback) => {
 };
 
 const addSystemUi = (systemName, type) => {
+  console.log(systemName);
   systems[systemName] = {
     lastStatus: 'created',
     timestamp: Date.now(),
@@ -62,7 +64,7 @@ const updateSystemUi = system => {
 };
 
 const sendUpdates = () => {
-  const jsonUpdate = JSON.stringify({ systems, commands, pendingSystems });
+  const jsonUpdate = JSON.stringify({ systems, commands, logs, pendingSystems });
 
   uiCxes.forEach(connection => {
     if (connection && connection.readyState === 1) {
@@ -81,7 +83,21 @@ const removeCommand = id => {
   sendUpdates();
 };
 
+const logToUi = (...log) => {
+  logs = [
+    `${Date.now()} - ${
+      [...log]
+        .map(item => {
+          return typeof item === 'object' ? JSON.stringify(item) : `${item}`
+        })
+        .join(' ')
+    }`, ...logs].slice(0, 500);
+
+  sendUpdates();
+};
+
 const updateUiWithTransition = (nextState, update, errors) => {
+  console.log(nextState);
   const { id, system, state, type, fields } = update;
   const fieldProps = (fields || []).reduce((accum, curr) => {
     return { ...accum, [curr.name]: curr.value };
@@ -138,6 +154,7 @@ module.exports = {
   addUiConnection,
   addSystemUi,
   addPendingSystemUi,
+  logToUi,
   removeCommand,
   updateSystemUi,
   updateUiWithTransition,

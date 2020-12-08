@@ -1,4 +1,5 @@
 {
   "port": 3003,
-  "systemHandshake": "garbanzo bean chattahoochee"
+  "systemHandshake": "12345",
+  "uiHost": "localhost:3000"
 }

@@ -9,11 +9,9 @@ const systemIncomingMessageHandler = ({ sendToMajorTom, emitTransition }) => {
     } else if (type === 'start_chunked_file') {
       emitTransition('start_file_receive', { ...asObj, system });
     } else if (type === 'file_chunk') {
-      // TODO: Figure out the api for file chunk
       emitTransition('receive_file_chunk', { ...asObj, system });
-    } else if (type === 'file_done', { ...asObj, system }) {
-      // TODO: Figure out the api for file done
-      emitTransition('receive_file_done');
+    } else if (type === 'file_done') {
+      emitTransition('receive_file_done', { ...asObj, system });
     } else {
       sendToMajorTom(type)(asObj);
     }

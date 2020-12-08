@@ -3,6 +3,7 @@ const http = require('http');
 // const https = require('https'); // Todo: figure out how to configure for a secure WS
 const path = require('path');
 
+const busboy = require('connect-busboy');
 const cors = require('cors');
 const express = require('express');
 const { newNodeGateway } = require('majortom-gateway');
@@ -26,13 +27,16 @@ const {
   addSystemUi,
   addPendingSystemUi,
   addUiConnection,
-  updateUiWithTransition,
+  logToUi,
   removeCommand,
+  updateUiWithTransition,
 } = require('./uiManager');
 const newFileHandler = require('./FileHandler');
 const usbMonitor = require('./getUsbPaths')();
 
+usbMonitor.startPolling();
 usbMonitor.on('inserted', insertedPaths => {
+  console.log(insertedPaths);
   insertedPaths.forEach(insertedPath => {
     addPendingSystemUi(path.join('/dev/', insertedPath));
   });
@@ -60,7 +64,13 @@ let checkCommandValid = () => true;
 let savedToken = `generate dynamic placeholder value ${Date.now()}`;
 let majorTomCx;
 
-const { receiveFileFromHttp, unloadWaitingFiles, upload } = fileUploader(majorTomCx);
+const customLogger = (...logMessage) => {
+  console.log(...logMessage);
+  logToUi(...logMessage);
+  // TODO: log to a log file?
+};
+
+const { unloadWaitingFiles, upload } = fileUploader(majorTomCx);
 const fileHandler = newFileHandler();
 
 eventBus.on(SYSTEM_ADDED, (system, type, cx) => {
@@ -252,6 +262,7 @@ const defaultListeners = {
   cancel_on_gateway: data => {
     const { system } = data;
 
+    // TODO: commandQueuer doesn't exist any more; handle canceling a command with systemManager.
     commandQueuer.removeFromQueue(system, data);
 
     if (commandHandlers.cancelled) {
@@ -373,8 +384,10 @@ server.on('upgrade', (req, socket, head) => {
   const systemName = validateSystemWs(req);
 
   // TODO: Handle an invalidated websocket upgrade request
-
-  if (systemName.ui === true) {
+  if (systemName instanceof Error) {
+    customLogger(systemName);
+    req.end();
+  } else if (systemName.ui === true) {
     wss.handleUpgrade(req, socket, head, wsCx => {
       wss.emit('uiConnect', wsCx);
     });
@@ -403,6 +416,7 @@ app.use(cors({ origin: 'http://localhost:3000' }));
 
 app.use(express.json());
 app.use(express.query());
+app.use(busboy());
 
 app.post('/add-system', (req, res) => {
   const { systemName } = req.body;
@@ -478,10 +492,6 @@ app.post('/add-system-usb', (req, res) => {
   res.sendStatus(200);
 });
 
-app.post('/upload-file-to-mt', (req, res) => {
-
-});
-
 app.get('/system/:systemName/', (req, res) => {
   const { systemName } = req.params;
 
@@ -504,6 +514,34 @@ app.get('/system/:systemName/', (req, res) => {
   res.json({ messages });
 });
 
+app.get('/system/:systemName/command_definitions', (req, res) => {
+  const { systemName } = req.params;
+
+  if (!validateSystemHttp(req)) {
+    return res.sendStatus(403);
+  }
+
+  const definitions = req.body[systemName];
+
+  if (definitions) {
+    handleSystemIncomingMessage({
+      type: 'command_definitions_update',
+      command_definitions: {
+        system: systemName,
+        definitions,
+      },
+    });
+
+    // TODO: Major Tom will now know about this system, even if it hasn't connected yet; we should
+    // tell the gateway about it now if the gateway doesn't already know about it, i.e. add it to
+    // systemManager in an "Unknow"(?) state, as well as tot he uiManager.
+
+    res.sendStatus(200);
+  } else {
+    res.sendStatus(404);
+  }
+});
+
 app.post('/system/:systemName/file', (req, res) => {
   const { systemName } = req.params;
   const { commandId, fileName } = req.query;
@@ -512,16 +550,49 @@ app.post('/system/:systemName/file', (req, res) => {
     return res.sendStatus(403);
   }
 
-  if (!(req.files && req.files.fileUpload)) {
-    return res.status(500).send('Error: Send a single file in the "fileUpload" field');
+  if (!req.busboy) {
+    return res.sendStatus(400);
   }
 
-  receiveFileFromHttp({ systemName, fileName, commandId }, fileUpload)
-    .then(fileObj => {
-      upload(fileObj);
+  const data = { system: systemName, id: commandId };
+
+  req.busboy.on('file', (fieldName, file, fileName, encoding, mimetype) => {
+    let sequence = 0;
+
+    fileHandler.onDone(systemName, fileName)((err, filePath) => {
+      if (err) {
+        eventBus.emit(
+          'transition',
+          'failed_on_system',
+          data,
+          [new Error(`Downlink of file ${fileName} from sytem ${systemName} was missing chunks ${err}`)]
+        );
+
+        res.sendStatus(500);
+
+        return;
+      }
+
+      upload({ fileName, filePath, system: systemName, contentType: mimetype, commandId });
+
+      if (commandId) {
+        eventBus.emit('transition', 'done_on_system', data);
+      }
+
       res.sendStatus(200);
-    })
-    .catch(errorMessage => res.status(500).send(errorMessage));
+    });
+
+    file.on('data', chunk => {
+      fileHandler.writeChunk(systemName, fileName, { chunk, sequence });
+      sequence += 1;
+    });
+
+    file.on('end', () => {
+      fileHandler.finish(systemName, fileName);
+    });
+  });
+
+  req.pipe(req.busboy);
 });
 
 app.get('/connect', (req, res) => {
@@ -544,6 +615,7 @@ app.get('/connect', (req, res) => {
         commandCallback,
         cancelCallback,
         errorCallback,
+        customLogger,
       })
 
       majorTomCx.connect();

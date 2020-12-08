@@ -40,26 +40,6 @@ const fileUploader = cx => {
     fs.mkdirSync(TEMP_FILE_PATH);
   }
 
-  const receiveFileFromHttp = (passedData, fileData) => new Promise((resolve, reject) => {
-    const { systemName: system, commandId, fileName } = passedData;
-    const { name, data, mimeType: contentType } = fileData;
-    const filePath = buildFilePath(system, fileName);
-
-    fs.writeFile(filePath, data, (err) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve({
-          fileName: fileName || name || 'no_filename_provided',
-          filePath,
-          system,
-          contentType,
-          commandId,
-        });
-      }
-    });
-  });
-
   /**
    * Schedule a file to be uploaded to Major Tom.
    * @param {Object} fileData The needed information to upload the file
@@ -119,7 +99,6 @@ const fileUploader = cx => {
   });
 
   return {
-    receiveFileFromHttp,
     upload,
     unloadWaitingFiles,
   };
