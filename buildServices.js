@@ -1,4 +1,5 @@
 const dgram = require('dgram');
+const EventEmitter = require('events');
 const { PassThrough, Transform, Writable } = require('stream');
 
 const cors = require('cors');
@@ -11,6 +12,7 @@ const {
   newStringToUDPToSpacePacket,
   newStringToUdp,
 } = require('./spacePacketFramers');
+const { KISSSender } = require('./kissTncParser');
 
 class HttpDestination extends Writable {
   constructor(opts = {}) {
@@ -85,6 +87,7 @@ class UdpSender extends Writable {
 const parserMap = {
   string_to_spacepacket: newStringToSpacePacket,
   udp_to_spacepacket: newStringToUDPToSpacePacket,
+  kiss_tnc: configs => new KISSSender(configs),
 };
 
 const getUdpAddressInfo = serviceStr => {
@@ -109,7 +112,7 @@ const createServiceChain = (serviceNames, serviceConfigs, destination) => {
   let i = 1;
 
   while (i < serviceNames.length) {
-    const nextStream = parsers[serviceNames[i]](serviceConfigs[i] || {});
+    const nextStream = parserMap[serviceNames[i]](serviceConfigs[i] || {});
 
     lastPipe = lastPipe.pipe(nextStream);
     i += 1;
@@ -144,14 +147,19 @@ const createInboundChain = (receivers, configs, destination) => {
 };
 
 const buildServices = ({ done, serviceConfig }) => {
+  const receiver = new EventEmitter();
   const {
+    file = {},
     presets = {},
+    channel_id,
     http_listen_port,
     https_listen_port,
     udp_send_port,
     udp_version,
     ...services
   } = serviceConfig;
+  const fileIntakes = {};
+  const activeFileIntakes = {};
   const serviceMap = {};
   const cancelStrings = {};
   const udpFilters = {};
@@ -164,11 +172,6 @@ const buildServices = ({ done, serviceConfig }) => {
 
   if (httpApp) { httpApp.use(express.json()); }
   if (httpsApp) { httpsApp.use(express.json()); };
-
-  // const [httpApp, httpsApp] = [http_listen_port, https_listen_port]
-  //   .filter(x => x)
-  //   .map(value => value && express())
-  //   .forEach(app => app && app.use(express.json()));
 
   const getCancelStringForService = serviceName => {
     const serviceCancel = cancelStrings[serviceName];
@@ -194,7 +197,17 @@ const buildServices = ({ done, serviceConfig }) => {
     return udpFilters[address] || udpFilters[`${address}_${port}`];
   };
 
-  Object.entries(services).forEach(([serviceName, configObj]) => {
+  Object.keys(file).forEach(fileServiceKey => {
+    const enhancedKey = `file.${fileServiceKey}`;
+
+    file[enhancedKey] = { ...file[fileServiceKey] };
+
+    delete file[fileServiceKey];
+  });
+
+  console.log({ ...services, ...file });
+
+  Object.entries({ ...file, ...services}).forEach(([serviceName, configObj]) => {
     const {
       mode,
       baud_rate,
@@ -207,6 +220,9 @@ const buildServices = ({ done, serviceConfig }) => {
       offset,
       max_length,
       udp_version: config_udp_version,
+      channel_id: file_channel_id,
+      blocking,
+      shared,
       service_destination,
       service_chain,
       service_configs,
@@ -215,9 +231,31 @@ const buildServices = ({ done, serviceConfig }) => {
       cancel_string,
     } = configObj;
 
-    const mappedConfigs = service_configs.map(configName => (presets[configName] || configName));
+    const mappedConfigs = (service_configs || []).map(configName => (presets[configName] || configName));
 
     cancelStrings[serviceName] = cancel_string;
+
+    if (serviceName.startsWith('file.')) {
+      if (!file_channel_id || channel_id) {
+        throw new Error('Creating a file service requires a channel_id');
+      }
+
+      fileIntakes[serviceName] = {
+        inbound: new PassThrough(),
+        blocking,
+        shared,
+        channel_id: file_channel_id || channel_id,
+      };
+
+      if (!(shared && blocking)) {
+        activeFileIntakes[serviceName] = true;
+      }
+
+      if (shared) {
+        serviceMap[serviceName] = shared;
+        return;
+      }
+    }
 
     switch (mode) {
       case 'USB': {
@@ -227,7 +265,9 @@ const buildServices = ({ done, serviceConfig }) => {
         serviceMap[service_name] = createServiceChain(service_chain, mappedConfigs, destination);
 
         if (receiveStream) {
-          receiveStream.on('data', done);
+          receiveStream.on('data', data => {
+            receiver.emit('data', serviceName, data);
+          });
         }
 
         break;
@@ -261,7 +301,9 @@ const buildServices = ({ done, serviceConfig }) => {
         }
 
         if (receiveStream) {
-          receiveStream.on('data', done);
+          receiveStream.on('data', data => {
+            receiver.emit('data', serviceName, data);
+          });
         }
 
         serviceMap[service_name] = createServiceChain(service_chain, mappedConfigs, destination);
@@ -308,14 +350,18 @@ const buildServices = ({ done, serviceConfig }) => {
             const inbound = createInboundChain(receive_chain, receive_configs, p);
 
             udpFilters[port === '*' || !port ? ip : `${ip}_${port}`] = p;
-            inbound.on('data', done);
+            inbound.on('data', data => {
+              receiver.emit('data', serviceName, data);
+            });
           } else {
             ports.forEach(portNumber => {
               const q = new PassThrough();
               const inbound = createInboundChain(receive_chain, receive_configs, q);
 
               udpFilters[`${ip}_${portNumber}`] = q;
-              inbound.on('data', done);
+              inbound.on('data', data => {
+                receiver.emit('data', serviceName, data);
+              });
             });
           }
         });
@@ -326,8 +372,7 @@ const buildServices = ({ done, serviceConfig }) => {
 
           udpFilters[`${connect.address || 'localhost'}_${connect.port}`] = p;
           inbound.on('data', data => {
-            console.log(data);
-            done(data);
+            receiver.emit('data', serviceName, data);
           });
         }
 
@@ -339,6 +384,28 @@ const buildServices = ({ done, serviceConfig }) => {
     }
   });
 
+  const getFileService = serviceName => {
+    const fileServiceName = serviceName.startsWith('file.') ? serviceName : `file.${serviceName}`;
+    const service = serviceMap[fileServiceName];
+    const outbound = typeof service === 'string' ? serviceMap[service] : service;
+    const { inbound, blocking, shared } = fileIntakes[fileServiceName];
+
+    if (blocking && shared) {
+      activeFileIntakes[fileServiceName] = true;
+    }
+
+    return { inbound, outbound, blocking };
+  };
+
+  const unblock = serviceName => {
+    const fileServiceName = serviceName.startsWith('file.') ? serviceName : `file.${serviceName}`;
+    const { blocking, shared } = fileIntakes[fileServiceName] || {};
+
+    if (blocking && shared) {
+      activeFileIntakes[fileServiceName] = false;
+    }
+  }
+
   const cancel = ({ id, system, service }) => {
     const cancelString = getCancelStringForService(servcice)
       .replace(
@@ -348,6 +415,24 @@ const buildServices = ({ done, serviceConfig }) => {
 
     serviceMap[service].write(cancelString);
   };
+
+  const handleIncomingMessage = (serviceName, data) => {
+    const { blocking, shared } = fileIntakes[serviceName] || {};
+
+    if (activeFileIntakes[serviceName]) {
+      fileIntakes[serviceName].inbound.write(data);
+
+      // This is the case where a file service is sharing a connection endpoint with regular, non-file
+      // messaging AND the file service hasn't been marked as blocking.
+      if (shared && !blocking) {
+        done(data);
+      }
+    } else {
+      done(data);
+    }
+  };
+
+  receiver.on('data', handleIncomingMessage);
 
   udpSockets.forEach(({ socket, bindPort }) => {
     socket.bind(bindPort);
@@ -359,6 +444,8 @@ const buildServices = ({ done, serviceConfig }) => {
   return {
     ...serviceMap,
     cancel,
+    getFileService,
+    unblock,
   };
 };
 

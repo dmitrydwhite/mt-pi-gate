@@ -75,7 +75,7 @@ class KISSReceiver extends Transform {
   }
 
   /**
-   * Interprets the content of the message. Properly escaped bytes will be replaced; imporoper
+   * Interprets the content of the message. Properly escaped bytes will be replaced; improper
    * escapes will drop both the Frame Escape byte and the next byte (i.e. if the next byte isn't one
    * of Transposed Frame Escape or Transposed Frame End). Returns either the bare content, or the
    * content with the leading Command Byte, depending on the class's instantiation option.

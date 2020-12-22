@@ -5,7 +5,11 @@ const { newNodeGateway } = require('majortom-gateway');
 const serviceConfig = require('./conf/serviceConfig.json');
 const systemAndCommandMap = require('./conf/systemConfig.json');
 const connectionProps = require('./conf/majorTomConfig.json');
+
 const buildServices = require('./buildServices');
+const { COMPLETED } = require('./constants');
+const { Downloader, FILE_WRITTEN } = require('./downloaderTransform');
+const { fileUplinker, UPLINK_STATE_CHANGE } = require('./fileServicer');
 
 const controller = new EventEmitter();
 
@@ -53,6 +57,14 @@ controller.on('command', command => {
 
   majortom.transmitCommandUpdate(id, 'preparing_on_gateway', command);
 
+  if (type === 'uplink_file' || type === 'downlink_file') {
+    return controller.emit(type, service, command);
+  }
+
+  if (service.indexOf('file.') >= 0) {
+    return controller.emit('file_service', service, command);
+  }
+
   if (!serviceMap[service]) {
     controller.emit('service_determination_error', command);
   } else {
@@ -76,6 +88,44 @@ controller.on('service_determined', (service, command) => {
     serviceMap[service].write(JSON.stringify(command));
     majortom.transmitCommandUpdate(command.id, 'uplinking_to_system', command);
   }
+});
+
+controller.on('uplink_file', (service, command) => {
+  const { id, fields } = command;
+  const fieldValues = {};
+  const downloader = new Downloader();
+  const { outbound, inbound, blocking, channel_id } = serviceMap.getFileService(service);
+
+  fields.forEach(({ name, value }) => fieldValues[name] = value);
+
+  const { gateway_download_path, path, mode } = fieldValues;
+
+  downloader.on(FILE_WRITTEN, directory => {
+    const uplinker = fileUplinker({
+      id: channel_id,
+      outbound,
+      inbound,
+      directory,
+      path,
+      mode,
+    });
+
+    uplinker.on(UPLINK_STATE_CHANGE, uplinkState => {
+      majortom.transmitCommandUpdate(id, uplinkState, command);
+
+      if (uplinkState === COMPLETED) {
+        uplinker = null;
+      }
+    });
+  });
+
+  majortom.transmitCommandUpdate(id, 'preparing_on_gateway', command);
+
+  majortom
+    .downloadStagedFile(gateway_download_path, downloader)
+    .catch(error => {
+      majortom.failCommand(id, [error]);
+    });
 });
 
 controller.on('received', update => {
