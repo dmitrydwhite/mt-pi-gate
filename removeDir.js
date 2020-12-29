@@ -5,7 +5,7 @@ const readdir = promisify(fs.readdir);
 const rmdir = promisify(fs.rmdir);
 const unlink = promisify(fs.unlink);
 
-module.exports.rmdirs = function rmdirs(dir) {
+const removeDir = function rmdirs(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
 
   entries.forEach(entry => {
@@ -20,3 +20,5 @@ module.exports.rmdirs = function rmdirs(dir) {
 
   fs.rmdirSync(dir);
 };
+
+module.exports = removeDir;
