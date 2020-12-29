@@ -59,11 +59,19 @@ class Downloader extends Writable {
       this.chunkIndex += 1;
     }
 
+    if (fs.existsSync(finalDir)) {
+      removeDir(finalDir);
+    }
+
     fs.mkdirSync(finalDir);
 
-    for (let i = 0; i < this.chunkIndex; i += 1) {
+    [...Array(this.chunkIndex)].forEach((_, i) => {
       fs.copyFileSync(path.join(tempDir, `${i}.txt`), path.join(finalDir, `${i}.txt`));
-    }
+    });
+
+    // for (let i = 0; i < this.chunkIndex; i += 1) {
+    //   fs.copyFileSync(path.join(tempDir, `${i}.txt`), path.join(finalDir, `${i}.txt`));
+    // }
 
     removeDir(tempDir);
 

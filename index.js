@@ -9,7 +9,7 @@ const connectionProps = require('./configs/majorTomConfig.json');
 const buildServices = require('./buildServices');
 const { COMPLETED } = require('./constants');
 const { Downloader, FILE_WRITTEN } = require('./downloaderTransform');
-const { fileUplinker, UPLINK_STATE_CHANGE } = require('./fileServicer');
+const { fileUplinker, UPLINK_STATE_CHANGE, UPLINK_PROGRESS } = require('./fileServicer');
 
 const controller = new EventEmitter();
 
@@ -145,6 +145,10 @@ controller.on('uplink_file', (service, command) => {
       directory,
       path,
       mode,
+    });
+
+    uplinker.on(UPLINK_PROGRESS, (state, progress) => {
+      majortom.transmitCommandUpdate(id, state, { ...command, ...progress });
     });
 
     uplinker.on(UPLINK_STATE_CHANGE, uplinkState => {

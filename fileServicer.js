@@ -6,6 +6,7 @@ const cbor = require('cbor-sync');
 
 const { UPLINKING_TO_SYSTEM, TRANSMITTED_TO_SYSTEM, COMPLETED } = require('./constants');
 const removeDir = require('./removeDir');
+const { emit } = require('process');
 
 const AWAITING_FIRST_NACK = 0;
 const SENDING = 1;
@@ -15,6 +16,9 @@ const DONE = 4;
 const VALIDATED = 5;
 
 const UPLINK_STATE_CHANGE = 'uplinker_state_changed';
+const UPLINK_PROGRESS = 'uplink_progress_update';
+const CHUNKS_TRANSMITTED = 'Chunks Sent';
+const CHUNKS_RESENT = 'Missed Chunks Re-Sent';
 
 /**
  * Interprets a received file storage location and provides the hash from the directory name,
@@ -39,6 +43,8 @@ const fileUplinker = ({
   const missingChunks = [];
   let phase = AWAITING_FIRST_NACK;
   let isResending = false;
+  let missingCount = 0;
+  let resendCount = 0;
   let finishAnyway;
 
   const compare = (received, expected) => {
@@ -74,7 +80,10 @@ const fileUplinker = ({
     let pairIndex = 0;
 
     while (pairIndex < pairs.length) {
-      missingChunks.push(pairs.slice(pairIndex, pairIndex + 2));
+      const m = pairs.slice(pairIndex, pairIndex + 2);
+
+      missingChunks.push(m);
+      missingCount += m[1] - m[0];
       pairIndex += 2;
     }
   };
@@ -97,10 +106,42 @@ const fileUplinker = ({
     return path.join(getRootPath(dir), `${num}.txt`);
   };
 
+  const emitChunkSent = current => {
+    if (phase === RESOLVING) {
+      resendCount += 1;
+
+      externalEmitter.emit(
+        UPLINK_PROGRESS,
+        UPLINKING_TO_SYSTEM,
+        {
+          progress_1_current: chunkLength,
+          progress_1_max: chunkLength,
+          progress_1_label: CHUNKS_TRANSMITTED,
+          progress_2_current: resendCount,
+          progress_2_max: missingCount,
+          progress_2_label: CHUNKS_RESENT,
+        }
+      );
+    }
+
+    if (phase === SENDING) {
+      externalEmitter.emit(
+        UPLINK_PROGRESS,
+        UPLINKING_TO_SYSTEM,
+        {
+          progress_1_current: current + 1,
+          progress_1_max: chunkLength,
+          progress_1_label: CHUNKS_TRANSMITTED,
+        }
+      );
+    }
+  };
+
   const sendFileChunks = (startChunk, endChunk) => {
     for (let i = startChunk; i < endChunk; i += 1) {
       const chunk = fs.readFileSync(getFileChunkFrom(i, directory));
 
+      emitChunkSent(i);
       outbound.write(cbor.encode([id, hash, i, chunk]));
     }
   };
@@ -201,6 +242,7 @@ const fileUplinker = ({
 };
 
 module.exports = {
+  UPLINK_PROGRESS,
   UPLINK_STATE_CHANGE,
   fileUplinker,
 };
