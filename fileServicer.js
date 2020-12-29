@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 const cbor = require('cbor-sync');
+const rimraf = require('rimraf');
+
 const { UPLINKING_TO_SYSTEM, TRANSMITTED_TO_SYSTEM, COMPLETED } = require('./constants');
 
 const AWAITING_FIRST_NACK = 0;
@@ -119,7 +121,7 @@ const fileUplinker = ({
   };
 
   const cleanupStoredFileChunks = () => {
-    fs.rmdirSync(getRootPath(directory), { recursive: true });
+    rimraf.sync(getRootPath(directory));
   };
 
   const handleInboundMessage = data => {
