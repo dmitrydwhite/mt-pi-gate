@@ -3,8 +3,9 @@ const path = require('path');
 const { Writable } = require('stream');
 
 const Blake2s = require('blake2s-js');
-const rimraf = require('rimraf');
 const uniqid = require('uniqid');
+
+const removeDir = require('./removeDir');
 
 const FILE_WRITTEN = 'file_written';
 
@@ -64,7 +65,7 @@ class Downloader extends Writable {
       fs.copyFileSync(path.join(tempDir, `${i}.txt`), path.join(finalDir, `${i}.txt`));
     }
 
-    rimraf.sync(tempDir;
+    removeDir(tempDir);
 
     this.emit(FILE_WRITTEN, path.join(finalDir, `${this.chunkIndex - 1}.txt`));
     done();
