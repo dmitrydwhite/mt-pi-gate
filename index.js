@@ -2,9 +2,9 @@ const { EventEmitter } = require('events');
 
 const { newNodeGateway } = require('majortom-gateway');
 
-const serviceConfig = require('./conf/serviceConfig.json');
-const systemAndCommandMap = require('./conf/systemConfig.json');
-const connectionProps = require('./conf/majorTomConfig.json');
+const serviceConfig = require('./configs/serviceConfig.json');
+const systemAndCommandMap = require('./configs/systemConfig.json');
+const connectionProps = require('./configs/majorTomConfig.json');
 
 const buildServices = require('./buildServices');
 const { COMPLETED } = require('./constants');
@@ -15,6 +15,7 @@ const controller = new EventEmitter();
 
 const cancelledCommands = {};
 const sentCommands = {};
+const paused = {};
 
 const systemJsonReceived = update => {
   controller.emit('received', update);
@@ -36,6 +37,30 @@ const cancelCallback = cancelId => {
     cancelledCommands[cancelId] = true;
   } else {
     serviceMap.cancel(cancelInfo);
+  }
+};
+
+const serviceIsPaused = (service, command) => {
+  if (paused[service]) {
+    paused[service].push(command);
+  }
+
+  return !!paused[service];
+};
+
+const pauseService = service => {
+  paused[service] = paused[service] || [];
+};
+
+const unpauseService = service => {
+  if (paused[service]) {
+    const toUnload = [...paused[service]];
+
+    paused[service] = null;
+
+    toUnload.forEach(command => {
+      controller.emit('service_determined', command);
+    });
   }
 };
 
@@ -84,10 +109,22 @@ controller.on('service_determined', (service, command) => {
   const { id, system } = command;
 
   if (!cancelledCommands[id]) {
-    sentCommands[id] = { id, system, service };
-    serviceMap[service].write(JSON.stringify(command));
-    majortom.transmitCommandUpdate(command.id, 'uplinking_to_system', command);
+    if (!serviceIsPaused(service, command)) {
+      sentCommands[id] = { id, system, service };
+      serviceMap[service].write(JSON.stringify(command));
+      majortom.transmitCommandUpdate(command.id, 'uplinking_to_system', command);
+    }
   }
+});
+
+controller.on('downlink_file', (service, command) => {
+  const { id, fields } = command;
+  const fieldValues = {};
+  const { outbound, inbound, blocking, channel_id } = serviceMap.getFileService(service);
+
+  fields.forEach(({ name, value }) => fieldValues[name] = value);
+
+  const { filename } = fieldValues;
 });
 
 controller.on('uplink_file', (service, command) => {
@@ -114,6 +151,11 @@ controller.on('uplink_file', (service, command) => {
       majortom.transmitCommandUpdate(id, uplinkState, command);
 
       if (uplinkState === COMPLETED) {
+        if (blocking) {
+          serviceMap.unblock(service);
+          unpauseService(service);
+        }
+
         uplinker = null;
       }
     });
@@ -123,6 +165,11 @@ controller.on('uplink_file', (service, command) => {
 
   majortom
     .downloadStagedFile(gateway_download_path, downloader)
+    .then(() => {
+      if (blocking) {
+        pauseService(service);
+      }
+    })
     .catch(error => {
       majortom.failCommand(id, [error]);
     });

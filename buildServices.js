@@ -306,7 +306,7 @@ const buildServices = ({ done, serviceConfig }) => {
           });
         }
 
-        serviceMap[service_name] = createServiceChain(service_chain, mappedConfigs, destination);
+        serviceMap[serviceName] = createServiceChain(service_chain, mappedConfigs, destination);
 
         app[method.toLowerCase()](...methodArgs);
         break;
