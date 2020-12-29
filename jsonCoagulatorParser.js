@@ -5,7 +5,7 @@ const OBJECT = 'OBJECT';
 
 class JSONCoagulator extends Transform {
   constructor(options = {}) {
-    super({ objectMode: true });
+    super({ readableObjectMode: true });
     const outputType = (options.output || '').toUpperCase();
 
     switch (outputType) {

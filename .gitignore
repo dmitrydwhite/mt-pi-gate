@@ -1,5 +1,6 @@
 /.vscode
 /node_modules
-/temp_file_storage
+/fileStore/**
+/configs/**.json
 
 **/**.http
