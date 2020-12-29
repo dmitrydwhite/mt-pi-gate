@@ -138,7 +138,7 @@ controller.on('uplink_file', (service, command) => {
   const { gateway_download_path, path, mode } = fieldValues;
 
   downloader.on(FILE_WRITTEN, directory => {
-    const uplinker = fileUplinker({
+    let uplinker = fileUplinker({
       id: channel_id,
       outbound,
       inbound,
