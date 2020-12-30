@@ -121,6 +121,7 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
       retries += 1;
 
       if (retries >= retryMax) {
+        clearInterval(nackTimer);
         scheduler.emit('next_phase', NOACK_TIMEOUT);
       } else {
         scheduler.emit('next_phase', RECONCILING);
