@@ -162,6 +162,8 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
   };
 
   inbound.on('data', data => {
+    data = cbor.decode(data);
+
     switch (phase) {
       case AWAITING_METADATA:
         if (createDownlinkerFromCorrectMetadata(data)) {
@@ -202,7 +204,7 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
     }
   });
 
-  outbound.write([id, 'import', filename]);
+  outbound.write(cbor.encode([id, 'import', filename]));
   externalEmitter.emit(DOWNLINKER_STATE_CHANGE, TRANSMITTED_TO_SYSTEM);
 
   return externalEmitter;
