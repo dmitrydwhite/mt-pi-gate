@@ -7,9 +7,11 @@ const systemAndCommandMap = require('./configs/systemConfig.json');
 const connectionProps = require('./configs/majorTomConfig.json');
 
 const buildServices = require('./buildServices');
-const { COMPLETED } = require('./constants');
+const { COMPLETED, FAILED, PROCESSING_ON_GATEWAY } = require('./constants');
 const { Downloader, FILE_WRITTEN } = require('./downloaderTransform');
 const { fileUplinker, UPLINK_STATE_CHANGE, UPLINK_PROGRESS } = require('./fileServicer');
+const fileDownlinker = require('./fileDownlinker');
+const { DOWNLINKER_STATE_CHANGE } = require('./fileDownlinker');
 
 const controller = new EventEmitter();
 
@@ -121,10 +123,27 @@ controller.on('downlink_file', (service, command) => {
   const { id, fields } = command;
   const fieldValues = {};
   const { outbound, inbound, blocking, channel_id } = serviceMap.getFileService(service);
+  const filename = fields.find(({ name }) => name === 'filename').value;
+  let downlinker = fileDownlinker({ id: channel_id, outbound, inbound, filename });
 
-  fields.forEach(({ name, value }) => fieldValues[name] = value);
+  downlinker.on(DOWNLINKER_STATE_CHANGE, (state, info) => {
+    switch (state) {
+      case FAILED:
+        downlinker = null;
+        majortom.failCommand(id, [info]);
+        break;
+      case PROCESSING_ON_GATEWAY:
+        downlinker = null;
+        majortom.uploadDownlinkedFile(filename, info, system, Date.now(), contentType, id, metadata)
+          .then(result => {
+            majortom.completeCommand(id, { output: JSON.stringify(result) });
+          });
+      default:
+        majortom.transmitCommandUpdate(id, state);
+      }
 
-  const { filename } = fieldValues;
+  });
+
 });
 
 controller.on('uplink_file', (service, command) => {

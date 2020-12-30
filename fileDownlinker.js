@@ -11,6 +11,7 @@ const {
   ACKED_BY_SYSTEM,
   DOWNLINKING_FROM_SYSTEM,
   PROCESSING_ON_GATEWAY,
+  FAILED,
 } = require('./constants');
 
 const SILENCE_TIME = 2000;
@@ -21,6 +22,7 @@ const SEND_FIRST_NACK = 1;
 const RECEIVING_CHUNKS = 2;
 const RECONCILING = 3;
 const CHUNKS_COMPLETE = 4;
+const NOACK_TIMEOUT = 5;
 
 class FileReceiver extends Writable {
   constructor({ channel, hash, len, storagePath = '/fileStore/store' }) {
@@ -96,11 +98,14 @@ class FileReceiver extends Writable {
   }
 }
 
-const fileDownlinker = ({ id, filename, outbound, inbound, storagePath }) => {
+const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax = 5 }) => {
   const scheduler = new EventEmitter();
   const externalEmitter = new EventEmitter();
   let phase = AWAITING_METADATA;
   let missingChunks = [];
+  let expectedChunks = 0;
+  let retries = 0;
+  let expectedHash;
   let downlinkReceiver;
   let nackTimer;
 
@@ -112,10 +117,30 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath }) => {
     const [recId, isTrue, hash, len, mode] = data;
 
     if (recId === id && isTrue === true) {
+      expectedHash = hash;
+      expectedChunks = len;
       downlinkReceiver = new FileReceiver({ channel: id, hash, len, storagePath });
     }
 
     return !!downlinkReceiver;
+  };
+
+  const resetNackInterval = () => {
+    retries = 0;
+
+    if (nackTimer) {
+      clearInterval(nackTimer);
+    }
+
+    nackTimer = setInterval(() => {
+      retries += 1;
+
+      if (retries >= retryMax) {
+        scheduler.emit('next_phase', NOACK_TIMEOUT);
+      } else {
+        scheduler.emit('next_phase', RECONCILING);
+      }
+    }, SILENCE_TIME);
   };
 
   const prepareToReceive = () => {
@@ -124,6 +149,8 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath }) => {
     });
 
     downlinkReceiver.on('file_received', fileStoragePath => {
+      resetNackInterval();
+
       scheduler.emit('next_phase', CHUNKS_COMPLETE, fileStoragePath);
     });
   };
@@ -131,14 +158,7 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath }) => {
   const receiveChunk = data => {
     downlinkReceiver && downlinkReceiver.write(data);
 
-    clearTimeout(nackTimer);
-    nackTimer = setTimeout(() => {
-      sendCurrentDownlinkState();
-    }, SILENCE_TIME);
-  };
-
-  const sendCurrentDownlinkState = () => {
-    scheduler.emit('next_phase', missingChunks.length < 2 ? CHUNKS_COMPLETE : RECONCILING);
+    resetNackInterval();
   };
 
   inbound.on('data', data => {
@@ -168,11 +188,14 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath }) => {
         outbound.write(cbor.encode([id, expectedHash, false, 0, expectedChunks]));
         break;
       case RECONCILING:
-        outbound.write(cbor.encode([id, hash, false, ...missingChunks]));
+        outbound.write(cbor.encode([id, expectedHash, false, ...missingChunks]));
         break;
       case CHUNKS_COMPLETE:
-        outbound.write(cbor.encode([id, hash, true]));
+        outbound.write(cbor.encode([id, expectedHash, true]));
         externalEmitter.emit(DOWNLINKER_STATE_CHANGE, PROCESSING_ON_GATEWAY, info);
+        break;
+      case NOACK_TIMEOUT:
+        externalEmitter.emit(DOWNLINKER_STATE_CHANGE, FAILED, TIMEOUT_ERROR);
         break;
       default:
         break;
