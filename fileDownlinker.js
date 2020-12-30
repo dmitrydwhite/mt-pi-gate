@@ -109,22 +109,6 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
   let downlinkReceiver;
   let nackTimer;
 
-  const createDownlinkerFromCorrectMetadata = data => {
-    if (!Array.isArray(data)) {
-      return false;
-    }
-
-    const [recId, isTrue, hash, len, mode] = data;
-
-    if (recId === id && isTrue === true) {
-      expectedHash = hash;
-      expectedChunks = len;
-      downlinkReceiver = new FileReceiver({ channel: id, hash, len, storagePath });
-    }
-
-    return !!downlinkReceiver;
-  };
-
   const resetNackInterval = () => {
     retries = 0;
 
@@ -141,6 +125,23 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
         scheduler.emit('next_phase', RECONCILING);
       }
     }, SILENCE_TIME);
+  };
+
+  const createDownlinkerFromCorrectMetadata = data => {
+    if (!Array.isArray(data)) {
+      return false;
+    }
+
+    const [recId, isTrue, hash, len, mode] = data;
+
+    if (recId === id && isTrue === true) {
+      expectedHash = hash;
+      expectedChunks = len;
+      downlinkReceiver = new FileReceiver({ channel: id, hash, len, storagePath });
+      resetNackInterval();
+    }
+
+    return !!downlinkReceiver;
   };
 
   const prepareToReceive = () => {
