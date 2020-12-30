@@ -17,7 +17,7 @@
     "connect-busboy": "0.0.2",
     "cors": "^2.8.5",
     "express": "^4.17.1",
-    "majortom-gateway": "^0.3.3",
+    "majortom-gateway": "^0.3.4",
     "serialport": "^9.0.4",
     "udp-packet": "^2.0.0",
     "uniqid": "5.2.0"
