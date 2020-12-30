@@ -207,6 +207,7 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
 
   outbound.write(cbor.encode([id, 'import', filename]));
   externalEmitter.emit(DOWNLINKER_STATE_CHANGE, TRANSMITTED_TO_SYSTEM);
+  resetNackInterval();
 
   return externalEmitter;
 };
