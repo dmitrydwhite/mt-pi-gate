@@ -123,7 +123,10 @@ controller.on('downlink_file', (service, command) => {
   const { id, fields } = command;
   const fieldValues = {};
   const { outbound, inbound, blocking, channel_id } = serviceMap.getFileService(service);
-  const filename = fields.find(({ name }) => name === 'filename').value;
+  const fieldVals = fields.reduce((accum, curr) => {
+    return { ...accum, [curr.name]: curr.value };
+  }, {});
+  const { filename, metadata, content_type } = fieldVals;
   let downlinker = fileDownlinker({ id: channel_id, outbound, inbound, filename });
 
   downlinker.on(DOWNLINKER_STATE_CHANGE, (state, info) => {
@@ -134,7 +137,7 @@ controller.on('downlink_file', (service, command) => {
         break;
       case PROCESSING_ON_GATEWAY:
         downlinker = null;
-        majortom.uploadDownlinkedFile(filename, info, system, Date.now(), contentType, id, metadata)
+        majortom.uploadDownlinkedFile(filename, info, system, Date.now(), content_type, id, metadata)
           .then(result => {
             majortom.completeCommand(id, { output: JSON.stringify(result) });
           });
