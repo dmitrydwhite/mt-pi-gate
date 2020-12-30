@@ -121,7 +121,6 @@ controller.on('service_determined', (service, command) => {
 
 controller.on('downlink_file', (service, command) => {
   const { id, fields } = command;
-  const fieldValues = {};
   const { outbound, inbound, blocking, channel_id } = serviceMap.getFileService(service);
   const fieldVals = fields.reduce((accum, curr) => {
     return { ...accum, [curr.name]: curr.value };
