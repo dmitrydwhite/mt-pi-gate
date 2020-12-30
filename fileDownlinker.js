@@ -16,6 +16,7 @@ const {
 
 const SILENCE_TIME = 2000;
 const DOWNLINKER_STATE_CHANGE = 'downlinker_state_change';
+const TIMEOUT_ERROR = 'The gateway did not receive the expected acknowledgement for the file downlink';
 
 const AWAITING_METADATA = 0;
 const SEND_FIRST_NACK = 1;
