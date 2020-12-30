@@ -10,8 +10,7 @@ const buildServices = require('./buildServices');
 const { COMPLETED, FAILED, PROCESSING_ON_GATEWAY } = require('./constants');
 const { Downloader, FILE_WRITTEN } = require('./downloaderTransform');
 const { fileUplinker, UPLINK_STATE_CHANGE, UPLINK_PROGRESS } = require('./fileServicer');
-const fileDownlinker = require('./fileDownlinker');
-const { DOWNLINKER_STATE_CHANGE } = require('./fileDownlinker');
+const { DOWNLINKER_STATE_CHANGE, fileDownlinker } = require('./fileDownlinker');
 
 const controller = new EventEmitter();
 
