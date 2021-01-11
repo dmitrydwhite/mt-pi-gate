@@ -3,7 +3,7 @@ const fs = require('fs');
 const { Writable } = require('stream');
 
 const Blake2s = require('blake2s-js');
-const cbor = require('cbor-sync');
+const cbor = require('cbor-x');
 const uniqid = require('uniqid');
 
 const {
@@ -34,14 +34,15 @@ class FileReceiver extends Writable {
     this.store = {};
     this.nextExpected = 0;
     this.hasher = new Blake2s(16);
+    this.finishedFilePath = path.join(storagePath, uniqid());
 
-    this.tempFile = fs.createWriteStream(path.join(storagePath, uniqid()));
+    this.tempFile = fs.createWriteStream(this.finishedFilePath);
   }
 
   calculateMissingChunks() {
     const missingPairs = [];
-    let i = 1;
     let infill = !!this.store[0];
+    let i = 1;
 
     if (!infill) {
       missingPairs.push(0);
@@ -69,7 +70,7 @@ class FileReceiver extends Writable {
 
     if (this.nextExpected === this.len) {
       this.tempFile.end();
-      this.emit('done');
+      this.emit('file_received', this.finishedFilePath);
       this._destroy();
     } else {
       this.calculateMissingChunks();
@@ -140,6 +141,7 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
       expectedHash = hash;
       expectedChunks = len;
       downlinkReceiver = new FileReceiver({ channel: id, hash, len, storagePath });
+      missingChunks = [0, expectedChunks];
       resetNackInterval();
     }
 
@@ -193,7 +195,11 @@ const fileDownlinker = ({ id, filename, outbound, inbound, storagePath, retryMax
         outbound.write(cbor.encode([id, expectedHash, false, 0, expectedChunks]));
         break;
       case RECONCILING:
-        outbound.write(cbor.encode([id, expectedHash, false, ...missingChunks]));
+        if (missingChunks.length > 0) {
+          outbound.write(cbor.encode([id, expectedHash, false, ...missingChunks]));
+        } else {
+          outbound.write(cbor.encode([id, 'import', filename]));
+        }
         break;
       case CHUNKS_COMPLETE:
         outbound.write(cbor.encode([id, expectedHash, true]));

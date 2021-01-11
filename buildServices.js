@@ -1,10 +1,18 @@
 const dgram = require('dgram');
 const EventEmitter = require('events');
-const { PassThrough, Transform, Writable } = require('stream');
+const { PassThrough, Writable } = require('stream');
 
 const cors = require('cors');
 const express = require('express');
 const SerialPort = require("serialport");
+const ByteLengthParser = require('@serialport/parser-byte-length')
+const CCTalkParser = require('@serialport/parser-cctalk')
+const DelimiterParser = require('@serialport/parser-delimiter')
+const InterByteTimeoutParser = require('@serialport/parser-inter-byte-timeout')
+const ReadlineParser = require('@serialport/parser-readline')
+const ReadyParser = require('@serialport/parser-ready')
+const RegexParser = require('@serialport/parser-regex')
+const SlipParser = require('@serialport/parser-slip-encoder');
 const udpPacket = require('udp-packet');
 
 const {
@@ -12,7 +20,7 @@ const {
   newStringToUDPToSpacePacket,
   newStringToUdp,
 } = require('./spacePacketFramers');
-const { KISSSender } = require('./kissTncParser');
+const { KISSSender, KISSReceiver } = require('./kissTncParser');
 
 class HttpDestination extends Writable {
   constructor(opts = {}) {
@@ -88,6 +96,16 @@ const parserMap = {
   string_to_spacepacket: newStringToSpacePacket,
   udp_to_spacepacket: newStringToUDPToSpacePacket,
   kiss_tnc: configs => new KISSSender(configs),
+  string_to_udp: configs => newStringToUdp(configs),
+  kiss_parser: configs => new KISSReceiver(configs),
+  slip_parser: configs => new SlipParser(configs),
+  byte_length_parser: configs => new ByteLengthParser(configs),
+  cctalk_parser: configs => new CCTalkParser(configs),
+  delimiter_parser: configs => new DelimiterParser(configs),
+  interbyte_timeout_parser: configs => new InterByteTimeoutParser(configs),
+  readline_parser: configs => new ReadlineParser(configs),
+  ready_parser: configs => new ReadyParser(configs),
+  regex_parser: configs => new RegexParser(configs),
 };
 
 const getUdpAddressInfo = serviceStr => {
@@ -205,8 +223,6 @@ const buildServices = ({ done, serviceConfig }) => {
     delete file[fileServiceKey];
   });
 
-  console.log({ ...services, ...file });
-
   Object.entries({ ...file, ...services}).forEach(([serviceName, configObj]) => {
     const {
       mode,
@@ -232,6 +248,7 @@ const buildServices = ({ done, serviceConfig }) => {
     } = configObj;
 
     const mappedConfigs = (service_configs || []).map(configName => (presets[configName] || configName));
+    const mappedReceiveConfigs = (receive_configs || []).map(configName => (presets[configName] || configName));
 
     cancelStrings[serviceName] = cancel_string;
 
@@ -260,7 +277,7 @@ const buildServices = ({ done, serviceConfig }) => {
     switch (mode) {
       case 'USB': {
         const destination = new SerialPort(service_destination, { baudRate: baud_rate });
-        const receiveStream = createInboundChain(receive_chain, receive_configs, destination);
+        const receiveStream = createInboundChain(receive_chain, mappedReceiveConfigs, destination);
 
         serviceMap[service_name] = createServiceChain(service_chain, mappedConfigs, destination);
 
@@ -277,7 +294,7 @@ const buildServices = ({ done, serviceConfig }) => {
         const isJson = accept_content === 'application/json';
         const destination = new HttpDestination({ isJson });
         const httpReceiver = new PassThrough({ objectMode: true });
-        const receiveStream = createInboundChain(receive_chain, receive_configs, httpReceiver);
+        const receiveStream = createInboundChain(receive_chain, mappedReceiveConfigs, httpReceiver);
         const app = mode === 'HTTP' ? httpApp : httpsApp;
         const routeHandler = (req, res) => {
           const messages = req.body[message_name || 'messages'] || [];
@@ -347,7 +364,7 @@ const buildServices = ({ done, serviceConfig }) => {
 
           if (!ports && !port) {
             const p = new PassThrough();
-            const inbound = createInboundChain(receive_chain, receive_configs, p);
+            const inbound = createInboundChain(receive_chain, mappedReceiveConfigs, p);
 
             udpFilters[port === '*' || !port ? ip : `${ip}_${port}`] = p;
             inbound.on('data', data => {
@@ -356,7 +373,7 @@ const buildServices = ({ done, serviceConfig }) => {
           } else {
             ports.forEach(portNumber => {
               const q = new PassThrough();
-              const inbound = createInboundChain(receive_chain, receive_configs, q);
+              const inbound = createInboundChain(receive_chain, mappedReceiveConfigs, q);
 
               udpFilters[`${ip}_${portNumber}`] = q;
               inbound.on('data', data => {
@@ -368,7 +385,7 @@ const buildServices = ({ done, serviceConfig }) => {
 
         if (connect) {
           const p = new PassThrough();
-          const inbound = createInboundChain(receive_chain, receive_configs, p);
+          const inbound = createInboundChain(receive_chain, mappedReceiveConfigs, p);
 
           udpFilters[`${connect.address || 'localhost'}_${connect.port}`] = p;
           inbound.on('data', data => {
@@ -376,7 +393,7 @@ const buildServices = ({ done, serviceConfig }) => {
           });
         }
 
-        serviceMap[serviceName] = createServiceChain(service_chain, service_configs, destination);
+        serviceMap[serviceName] = createServiceChain(service_chain, mappedConfigs, destination);
         break;
       }
       default:
@@ -389,12 +406,17 @@ const buildServices = ({ done, serviceConfig }) => {
     const service = serviceMap[fileServiceName];
     const outbound = typeof service === 'string' ? serviceMap[service] : service;
     const { inbound, blocking, shared } = fileIntakes[fileServiceName];
+    // This is an arbitrary way to generate a consistent Int under 256; not sure if this should be
+    // handled here on the gateway.
+    const channel_id = fileServiceName
+      .split('')
+      .reduce((accum, curr) => accum + curr.charCodeAt(0), 0) % 256;
 
     if (blocking && shared) {
       activeFileIntakes[fileServiceName] = true;
     }
 
-    return { inbound, outbound, blocking };
+    return { inbound, outbound, blocking, channel_id };
   };
 
   const unblock = serviceName => {

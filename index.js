@@ -9,8 +9,8 @@ const connectionProps = require('./configs/majorTomConfig.json');
 const buildServices = require('./buildServices');
 const { COMPLETED, FAILED, PROCESSING_ON_GATEWAY } = require('./constants');
 const { Downloader, FILE_WRITTEN } = require('./downloaderTransform');
-const { fileUplinker, UPLINK_STATE_CHANGE, UPLINK_PROGRESS } = require('./fileServicer');
 const { DOWNLINKER_STATE_CHANGE, fileDownlinker } = require('./fileDownlinker');
+const { fileUplinker, UPLINK_STATE_CHANGE, UPLINK_PROGRESS } = require('./fileServicer');
 
 const controller = new EventEmitter();
 
@@ -120,7 +120,7 @@ controller.on('service_determined', (service, command) => {
 
 controller.on('downlink_file', (service, command) => {
   const { id, fields } = command;
-  const { outbound, inbound, blocking, channel_id } = serviceMap.getFileService(service);
+  const { outbound, inbound, channel_id } = serviceMap.getFileService(service);
   const fieldVals = fields.reduce((accum, curr) => {
     return { ...accum, [curr.name]: curr.value };
   }, {});
@@ -139,12 +139,11 @@ controller.on('downlink_file', (service, command) => {
           .then(result => {
             majortom.completeCommand(id, { output: JSON.stringify(result) });
           });
+        break;
       default:
         majortom.transmitCommandUpdate(id, state);
       }
-
   });
-
 });
 
 controller.on('uplink_file', (service, command) => {
@@ -216,8 +215,9 @@ controller.on('received', update => {
     case 'command_definitions_update':
     case 'file_list':
     case 'file_metadata_update':
-    default:
       majortom.transmit(update);
+      break;
+    default:
       break;
   }
 });

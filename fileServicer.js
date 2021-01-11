@@ -2,11 +2,10 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 
-const cbor = require('cbor-sync');
+const cbor = require('cbor-x');
 
 const { UPLINKING_TO_SYSTEM, TRANSMITTED_TO_SYSTEM, COMPLETED } = require('./constants');
 const removeDir = require('./removeDir');
-const { emit } = require('process');
 
 const AWAITING_FIRST_NACK = 0;
 const SENDING = 1;
@@ -138,12 +137,21 @@ const fileUplinker = ({
   };
 
   const sendFileChunks = (startChunk, endChunk) => {
-    for (let i = startChunk; i < endChunk; i += 1) {
-      const chunk = fs.readFileSync(getFileChunkFrom(i, directory));
+    const arrLen = endChunk - startChunk;
+    const parallels = [...Array(arrLen)].map((_, idx) => idx + startChunk);
 
-      emitChunkSent(i);
-      outbound.write(cbor.encode([id, hash, i, chunk]));
-    }
+    parallels.forEach(chunkIdx => {
+      const rdStrm = fs.createReadStream(getFileChunkFrom(chunkIdx, directory));
+      let chk = Buffer.alloc(0);
+
+      rdStrm.on('data', chunk => {
+        chk = Buffer.concat([chk, chunk]);
+      });
+
+      rdStrm.on('end', () => {
+        outbound.write(cbor.encode([id, hash, chunkIdx, chunk]));
+      });
+    });
   };
 
   const resendMissingFileChunks = () => {
@@ -235,6 +243,7 @@ const fileUplinker = ({
   });
 
   inbound.on('data', handleInboundMessage);
+
   outbound.write(cbor.encode([id, hash, chunkLength]));
   outbound.write(cbor.encode([id, 'export', hash, inputPath, mode]));
 
