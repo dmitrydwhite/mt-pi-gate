@@ -1,3 +1,22 @@
+# Design Considerations and Assumptions for Quick-Start GP Gateway
+* Gateway runs on a raspberry pi and/or a separate process on a laptop
+* Gateway can connect over:
+  * UDP
+  * USB/SERIAL
+  * HTTP/S as a server (Stretch Goal)
+  * HTTP/S as a client (Stretch Goal)
+* Gateway handles all our known required commands:
+  * Uplink file
+  * Downlink file
+  * Update file list
+* We'll allow for multiple communications pathways... We might limit the pathways to have a 1:1 association with a system though... Let's try it this way:
+	* Files pathways must be used for files only
+  * Files pathways should have an export and import lane
+  * All traffic on a pathway is a blocking queue (FIFO)
+* If a command has a field named "graphql" then we'll extract that field text and send it in a space packet with the correct APID header for a GraphQL message to a KubOS system.
+* If it has a field named "shell_command" then we'll extract that field text and send it in a space packet with the correct APID for a UDP message to a KubOS system.
+
+
 # `majortom-gateway-server` Usage Guide
 
 ## What is `majortom-gateway-server`?
