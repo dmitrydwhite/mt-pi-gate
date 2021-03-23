@@ -201,7 +201,7 @@ const buildServices = ({ done, serviceConfig }) => {
     if (Array.isArray(serviceCancel)) {
       return serviceCancel.map(char => {
         if (typeof char === 'string') {
-          return ['${id', '${system}'].includes(char.toLowerCase()) ? char : parseInt(char, 16);
+          return ['${id}', '${system}'].includes(char.toLowerCase()) ? char : parseInt(char, 16);
         }
 
         return char;

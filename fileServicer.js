@@ -23,14 +23,17 @@ const CHUNKS_RESENT = 'Missed Chunks Re-Sent';
  * Interprets a received file storage location and provides the hash from the directory name,
  * as well as the number of chunks. Expects this path to be the path to the last (highest numbered)
  * chunk of the stored file.
- * @param {String} lastFileChunkPath The path to the last (highest numbered) chunk of the file
+ * @param {String} lastFileChunkPath The path to the last (presumably highest numbered) chunk of the file
  */
 const getHashAndLengthFromDirectory = lastFileChunkPath => {
   const pathParts = lastFileChunkPath.split(path.sep);
   const lastChunk = pathParts.pop();
   const hash = pathParts.pop();
 
-  return { hash, chunkLength: Number(lastChunk.replace('.txt', '')) + 1 };
+  return {
+    hash,
+    chunkLength: Number(lastChunk.replace(path.extname(lastChunk), '')) + 1,
+  };
 };
 
 const fileUplinker = ({
