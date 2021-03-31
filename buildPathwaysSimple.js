@@ -2,6 +2,7 @@ const dgram = require('dgram');
 const SerialPort = require('serialport');
 const SpacePacketParser = require('@serialport/parser-spacepacket');
 const { Writable } = require('stream');
+const { Emitter } = require('events');
 
 const spParser = new SpacePacketParser();
 
@@ -145,4 +146,104 @@ class UdpPathway extends Writable {
 
     return this.remote_address === address;
   }
+}
+
+const UdpGroup = config => {
+  const { listen_port, udp_version = 'udp4' } = config;
+  const internalW = new Writable();
+  const emitter = new Emitter();
+
+  const socket = dgram.createSocket(udp_version)
+
+  // Service and event maps
+  const onCbs = {};
+  const pathways = {};
+
+  // Internal methods
+  
+  const createPathway = config => {
+    if (typeof config !== 'object' || !config.remote_address) {
+      throw 'Pathway must be added using an object with remote_address property';
+    }
+
+    const { remote_address, remote_port } = config;
+    const remote_port_value = !remote_port || remote_port === '*' ? '' : remote_port;
+    const remote_id = `${remote_address}${remote_port_value ? `_${remote_port_value}` : ''}`;
+    const pathwayStream = new PassThrough();
+    const textDestination = `remote address ${remote_address}${remote_port_value ? ` and remote port ${remote_port_value}` : ''}`;
+
+    emitter.emit(
+      'info',
+      `Creating a pathway listening for messages from ${textDestination}`
+    );
+
+    if (!pathways[remote_id]) {
+      pathways[remote_id] = [pathwayStream];
+    } else {
+      emitter.emit('warning', `There are multiple pathways listening for messages from ${textDestination}`);
+      pathways[remote_id].push(pathwayStream);
+    }
+
+    return pathwayStream;
+  };
+  
+  const getPathwayFor = rinfo => {
+
+  };
+
+  const handleIncomingMessage = (data, rinfo) => {
+    getPathwayFor(rinfo).write(data);
+  };
+
+  // Exposed methods
+  
+  /**
+   * Attach callbacks to events emitted by UdpGroup.
+   * @param  {String} eventName The name of the event to listen for
+   * @param  {Function} cb The function to run when the event is heard
+   * @return {Boolean} True if the listener was successfully attached, false if not
+   */
+  const on = (eventName, cb) => {
+    if (typeof cb !== 'function') {
+      emitter.emit('error', new Error('Must add a function as a callback to event listeners.'));
+
+      return false;
+    }
+
+    if (typeof eventName !== 'string') {
+      emitter.emit('error', new Error('Must provide a string event name to listen for'));
+
+      return false;
+    }
+
+    const existing = onCbs[eventName];
+
+    if (!existing) {
+      onCbs[eventName] = cb;
+    } else if (typeof existing === 'function') {
+      onCbs[eventName] = [existing, cb]
+    } else {
+      existing.push(cb);
+    }
+
+    return true;
+  };
+
+  const addPathway = config => {
+    try {
+      emitter.emit('pathway', ...createPathway(config));
+    } catch (err) {
+      emitter.emit('error', err);
+    }
+  };
+
+  // Internal configuration code
+  socket.bind(listen_port);
+  socket.on('message', handleIncomingMessage);
+
+  return {
+    addPathway,
+    on,
+    send,
+  };
 }
